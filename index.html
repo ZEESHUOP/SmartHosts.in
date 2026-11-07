@@ -1,0 +1,273 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Bot Host</title>
+<style>
+  :root{
+    --bg:#0f1115; --panel:#171a21; --panel2:#1e222b; --line:#2a2f3a;
+    --text:#e8eaf0; --muted:#8b93a5; --accent:#4f8cff; --ok:#34c77b; --warn:#f0b429; --bad:#ef5b5b;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--text);font:15px/1.45 system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
+  .wrap{max-width:900px;margin:0 auto;padding:16px 14px 60px}
+  header{display:flex;align-items:center;justify-content:space-between;gap:10px;margin:6px 0 16px}
+  h1{font-size:20px;margin:0}
+  .dock{font-size:12px;color:var(--muted)}
+  .dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--muted);margin-right:6px}
+  .dot.ok{background:var(--ok)} .dot.bad{background:var(--bad)}
+  .banner{background:#3a1d1d;border:1px solid #6b2b2b;color:#ffb4b4;padding:10px 12px;border-radius:10px;margin-bottom:14px;display:none}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:14px;margin-bottom:14px}
+  .card h2{font-size:15px;margin:0 0 10px}
+  label{display:block;font-size:12px;color:var(--muted);margin:10px 0 4px}
+  input[type=text],textarea{width:100%;background:var(--panel2);border:1px solid var(--line);border-radius:9px;color:var(--text);padding:9px 10px;font:inherit}
+  textarea{min-height:70px;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:13px;resize:vertical}
+  .drop{display:block;border:1.5px dashed var(--line);border-radius:12px;padding:16px;text-align:center;color:var(--muted);cursor:pointer;background:var(--panel2)}
+  .drop.over{border-color:var(--accent);color:var(--text)}
+  .drop input{display:none}
+  .files{margin-top:8px;font-size:13px;color:var(--text);word-break:break-all}
+  .hint{font-size:12px;color:var(--muted);margin-top:6px}
+  button{font:inherit;border:1px solid var(--line);background:var(--panel2);color:var(--text);padding:7px 12px;border-radius:9px;cursor:pointer}
+  button:hover{border-color:#3a4150}
+  button.primary{background:var(--accent);border-color:var(--accent);color:#fff;font-weight:600}
+  button.danger{color:var(--bad)}
+  button:disabled{opacity:.5;cursor:not-allowed}
+  .bot{display:flex;flex-direction:column;gap:10px}
+  .row{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap}
+  .name{font-weight:600;font-size:16px}
+  .badge{font-size:11px;padding:2px 7px;border-radius:99px;background:var(--panel2);border:1px solid var(--line);color:var(--muted);margin-left:6px}
+  .pill{font-size:12px;padding:3px 9px;border-radius:99px;font-weight:600}
+  .pill.running{background:#143524;color:var(--ok)}
+  .pill.restarting{background:#3b2e0d;color:var(--warn)}
+  .pill.stopped{background:#262a33;color:var(--muted)}
+  .pill.busy{background:#13284d;color:var(--accent);animation:pulse 1.2s infinite}
+  .meta{font-size:12px;color:var(--muted)}
+  .err{font-size:12px;color:var(--bad);word-break:break-word}
+  .actions{display:flex;gap:6px;flex-wrap:wrap}
+  .actions button{padding:6px 10px;font-size:13px}
+  .empty{color:var(--muted);text-align:center;padding:24px 0}
+  dialog{background:var(--panel);color:var(--text);border:1px solid var(--line);border-radius:14px;padding:14px;width:min(760px,94vw)}
+  dialog::backdrop{background:rgba(0,0,0,.6)}
+  pre.logs{background:#0a0c10;border:1px solid var(--line);border-radius:10px;padding:10px;height:55vh;overflow:auto;font:12px/1.4 ui-monospace,Menlo,Consolas,monospace;white-space:pre-wrap;word-break:break-word;margin:10px 0}
+  @keyframes pulse{50%{opacity:.55}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>🤖 Bot Host</h1>
+    <div class="dock"><span class="dot" id="dockDot"></span><span id="dockTxt">checking Docker…</span></div>
+  </header>
+
+  <div class="banner" id="banner">Docker is not running. Start Docker Desktop (or the Docker service) and refresh.</div>
+
+  <div class="card">
+    <h2>Deploy a new bot</h2>
+    <label>Bot name</label>
+    <input type="text" id="name" placeholder="My Telegram bot" maxlength="40">
+
+    <label>Files</label>
+    <label class="drop" id="drop" style="margin:0">
+      <input type="file" id="files" multiple>
+      <div>Tap to choose, or drop files here</div>
+      <div class="files" id="fileList"></div>
+    </label>
+    <div class="hint">Node.js: <b>index.js</b> + <b>package.json</b> &nbsp;•&nbsp; Python: <b>bot.py</b> + <b>requirements.txt</b> &nbsp;•&nbsp; or one <b>.zip</b> of your project</div>
+
+    <label>Environment variables (optional, one per line, no quotes)</label>
+    <textarea id="env" placeholder="BOT_TOKEN=123456:ABC-your-token"></textarea>
+
+    <div style="margin-top:12px"><button class="primary" id="deploy">Deploy</button> <span class="meta" id="deployMsg"></span></div>
+  </div>
+
+  <div id="bots"></div>
+</div>
+
+<dialog id="logDlg">
+  <div class="row"><b id="logTitle">Logs</b><button id="logClose">Close</button></div>
+  <pre class="logs" id="logBox"></pre>
+  <div class="meta">Live — refreshes every 2 seconds</div>
+</dialog>
+
+<dialog id="envDlg">
+  <div class="row"><b id="envTitle">Settings</b><button id="envClose">Close</button></div>
+  <label>Environment variables</label>
+  <textarea id="envBox" style="min-height:150px"></textarea>
+  <div class="hint">Saving recreates the container, so the bot restarts.</div>
+  <div style="margin-top:10px"><button class="primary" id="envSave">Save &amp; restart</button></div>
+</dialog>
+
+<script>
+const $ = (s) => document.querySelector(s);
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+
+async function api(path, opts = {}) {
+  const r = await fetch(path, opts);
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(j.error || r.statusText);
+  return j;
+}
+
+/* ---------- Docker status ---------- */
+async function checkDocker() {
+  try {
+    const h = await api('/api/health');
+    $('#dockDot').className = 'dot ' + (h.docker ? 'ok' : 'bad');
+    $('#dockTxt').textContent = h.docker ? 'Docker ' + h.version : 'Docker offline';
+    $('#banner').style.display = h.docker ? 'none' : 'block';
+  } catch {
+    $('#dockTxt').textContent = 'server unreachable';
+  }
+}
+
+/* ---------- Bot list ---------- */
+function uptime(iso) {
+  const s = Math.max(0, (Date.now() - new Date(iso).getTime()) / 1000);
+  if (s < 60) return Math.floor(s) + 's';
+  if (s < 3600) return Math.floor(s / 60) + 'm';
+  if (s < 86400) return Math.floor(s / 3600) + 'h ' + Math.floor((s % 3600) / 60) + 'm';
+  return Math.floor(s / 86400) + 'd ' + Math.floor((s % 86400) / 3600) + 'h';
+}
+
+function card(b) {
+  let cls = 'stopped', label = 'Stopped';
+  if (b.busy) { cls = 'busy'; label = 'Working…'; }
+  else if (b.status === 'running') { cls = 'running'; label = 'Running'; }
+  else if (b.status === 'restarting') { cls = 'restarting'; label = 'Restarting'; }
+  else if (b.status === 'exited' && b.exitCode) { label = 'Crashed (exit ' + b.exitCode + ')'; }
+
+  const up = b.status === 'running' ? 'up ' + uptime(b.startedAt) + ' • ' : '';
+  const restarts = b.restarts ? b.restarts + ' auto-restart' + (b.restarts > 1 ? 's' : '') : 'no crashes';
+  const active = b.status === 'running' || b.status === 'restarting';
+
+  return `<div class="card bot" data-id="${esc(b.id)}">
+    <div class="row">
+      <div><span class="name">${esc(b.name)}</span><span class="badge">${b.type === 'node' ? 'Node.js' : 'Python'}</span></div>
+      <span class="pill ${cls}">${esc(label)}</span>
+    </div>
+    <div class="meta">${up}${restarts}${b.busy ? ' • ' + esc(b.busy) : ''}</div>
+    ${b.error ? `<div class="err">⚠ ${esc(b.error)}</div>` : ''}
+    <div class="actions">
+      ${active ? `<button data-a="stop">Stop</button>` : `<button data-a="start">Start</button>`}
+      <button data-a="restart">Restart</button>
+      <button data-a="logs">Logs</button>
+      <button data-a="env">Settings</button>
+      <button data-a="files">Update files</button>
+      <button data-a="delete" class="danger">Delete</button>
+    </div>
+  </div>`;
+}
+
+let busyUI = false;
+async function refresh() {
+  if (busyUI) return;
+  try {
+    const bots = await api('/api/bots');
+    $('#bots').innerHTML = bots.length ? bots.map(card).join('') : '<div class="empty">No bots yet. Deploy your first one above.</div>';
+  } catch (e) { /* keep last view */ }
+}
+
+$('#bots').addEventListener('click', async (ev) => {
+  const btn = ev.target.closest('button[data-a]');
+  if (!btn) return;
+  const id = btn.closest('.bot').dataset.id;
+  const name = btn.closest('.bot').querySelector('.name').textContent;
+  const a = btn.dataset.a;
+  try {
+    if (a === 'logs') return openLogs(id, name);
+    if (a === 'env') return openEnv(id, name);
+    if (a === 'files') return pickUpdate(id);
+    if (a === 'delete') {
+      if (!confirm('Delete "' + name + '" and all its files?')) return;
+      await api('/api/bots/' + id, { method: 'DELETE' });
+    } else {
+      await api('/api/bots/' + id + '/' + a, { method: 'POST' });
+    }
+    refresh();
+  } catch (e) { alert(e.message); }
+});
+
+/* ---------- Deploy form ---------- */
+const fileInput = $('#files');
+function showFiles() {
+  $('#fileList').textContent = [...fileInput.files].map((f) => f.name).join(', ');
+}
+fileInput.addEventListener('change', showFiles);
+const drop = $('#drop');
+['dragenter', 'dragover'].forEach((t) => drop.addEventListener(t, (e) => { e.preventDefault(); drop.classList.add('over'); }));
+['dragleave', 'drop'].forEach((t) => drop.addEventListener(t, (e) => { e.preventDefault(); drop.classList.remove('over'); }));
+drop.addEventListener('drop', (e) => { fileInput.files = e.dataTransfer.files; showFiles(); });
+
+$('#deploy').addEventListener('click', async () => {
+  const msg = $('#deployMsg');
+  if (!fileInput.files.length) { msg.textContent = 'Choose your bot files first.'; return; }
+  const fd = new FormData();
+  fd.append('name', $('#name').value);
+  fd.append('env', $('#env').value);
+  for (const f of fileInput.files) fd.append('files', f);
+  $('#deploy').disabled = true; msg.textContent = 'Uploading…';
+  try {
+    await api('/api/bots', { method: 'POST', body: fd });
+    msg.textContent = 'Deploying — dependencies install automatically.';
+    $('#name').value = ''; $('#env').value = ''; fileInput.value = ''; showFiles();
+    refresh();
+  } catch (e) { msg.textContent = '⚠ ' + e.message; }
+  $('#deploy').disabled = false;
+});
+
+/* ---------- Update files ---------- */
+function pickUpdate(id) {
+  const inp = document.createElement('input');
+  inp.type = 'file'; inp.multiple = true;
+  inp.onchange = async () => {
+    if (!inp.files.length) return;
+    const fd = new FormData();
+    for (const f of inp.files) fd.append('files', f);
+    try { await api('/api/bots/' + id + '/files', { method: 'POST', body: fd }); refresh(); }
+    catch (e) { alert(e.message); }
+  };
+  inp.click();
+}
+
+/* ---------- Logs ---------- */
+let logTimer = null, logId = null;
+async function pullLogs() {
+  if (!logId) return;
+  try {
+    const { logs } = await api('/api/bots/' + logId + '/logs?tail=400');
+    const box = $('#logBox');
+    const stick = box.scrollTop + box.clientHeight >= box.scrollHeight - 40;
+    box.textContent = logs.replace(/\x1b\[[0-9;]*m/g, '') || '(no output yet)';
+    if (stick) box.scrollTop = box.scrollHeight;
+  } catch {}
+}
+function openLogs(id, name) {
+  logId = id; $('#logTitle').textContent = 'Logs — ' + name; $('#logBox').textContent = 'Loading…';
+  $('#logDlg').showModal(); pullLogs();
+  logTimer = setInterval(pullLogs, 2000);
+}
+$('#logClose').onclick = () => $('#logDlg').close();
+$('#logDlg').addEventListener('close', () => { clearInterval(logTimer); logId = null; });
+
+/* ---------- Settings (env) ---------- */
+let envId = null;
+async function openEnv(id, name) {
+  envId = id; $('#envTitle').textContent = 'Settings — ' + name;
+  const { env } = await api('/api/bots/' + id + '/env');
+  $('#envBox').value = env; $('#envDlg').showModal();
+}
+$('#envClose').onclick = () => $('#envDlg').close();
+$('#envSave').onclick = async () => {
+  try {
+    await api('/api/bots/' + envId + '/env', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ env: $('#envBox').value }) });
+    $('#envDlg').close(); refresh();
+  } catch (e) { alert(e.message); }
+};
+
+checkDocker(); refresh();
+setInterval(refresh, 3000);
+setInterval(checkDocker, 15000);
+</script>
+</body>
+</html>
